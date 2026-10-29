@@ -1,12 +1,13 @@
 /**
  * TaskPulse Backend Server
- * Express + Supabase Auth / Client Adapter + Feature Flag Middleware
+ * Express + Supabase Real-Time Database & Auth Adapter + Feature Flag Middleware
  * Package: com.samdrashti.file1
  */
 
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 import {
   DEFAULT_CATEGORIES,
   INITIAL_BADGES,
@@ -26,7 +27,19 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// In-Memory Database Store (with persistent state across requests)
+// Initialize Supabase Client
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
+const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseKey) : null;
+
+if (isSupabaseConfigured) {
+  console.log(`[TaskPulse] Connected to live Supabase project: ${supabaseUrl}`);
+} else {
+  console.log('[TaskPulse] Running in local in-memory adapter mode (Supabase keys not yet configured).');
+}
+
+// In-Memory Database Store (with persistent state across requests and Supabase fallback)
 const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
 let currentUserProfile: UserProfile = {
@@ -36,7 +49,7 @@ let currentUserProfile: UserProfile = {
   avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   bio: 'Lead Software Architect | Mastering life tasks from First-Person View',
   role: 'Senior Software Engineer & Team Lead',
-  points: 480,
+  points: 560,
   level: 3,
   currentStreak: 6,
   longestStreak: 12,
@@ -45,7 +58,7 @@ let currentUserProfile: UserProfile = {
   isPremium: true,
   premiumUntil: oneYearFromNow,
   userGuides: {
-    completed: [],
+    completed: ['guide-cockpit'],
     skipped: [],
     skipAll: false,
   },
@@ -53,9 +66,6 @@ let currentUserProfile: UserProfile = {
 };
 
 let userCategories: Category[] = [...DEFAULT_CATEGORIES.map((c) => ({ ...c, userId: currentUserProfile.id }))];
-
-const today = new Date();
-const todayStr = today.toISOString().split('T')[0];
 
 const initialTasks: Task[] = [
   {
@@ -65,15 +75,16 @@ const initialTasks: Task[] = [
     description: 'Verify latency metrics under high traffic & ensure PagerDuty webhook latency is < 200ms.',
     categoryId: 'cat-office',
     priority: 'P1',
-    status: 'in_progress',
+    status: 'completed',
     startDate: new Date(Date.now() - 3600000 * 2).toISOString(),
     dueDate: new Date(Date.now() + 3600000 * 3).toISOString(),
     durationMinutes: 45,
     alarmEnabled: true,
     alarmTime: new Date(Date.now() + 3600000 * 1).toISOString(),
-    progress: 60,
+    progress: 100,
     dependencies: [],
-    completedAt: null,
+    completedAt: new Date().toISOString(),
+    pointsAwarded: 50,
   },
   {
     id: 'task-2',
@@ -152,8 +163,8 @@ let userRoutines: RoutineTemplate[] = [
     durationDays: 7,
     timesPerDay: ['09:00', '13:00', '18:00', '23:00'],
     priority: 'P1',
-    isActive: false,
-    lastActivatedAt: null,
+    isActive: true,
+    lastActivatedAt: new Date().toISOString(),
   },
   {
     id: 'routine-morning-sadhana',
@@ -181,15 +192,48 @@ let userRoutines: RoutineTemplate[] = [
 
 let userBadges: Badge[] = evaluateBadges(
   {
-    completedTasksCount: 12,
+    completedTasksCount: 14,
     currentStreak: currentUserProfile.currentStreak,
     focusSessionsCompleted: currentUserProfile.focusSessionsCompleted,
-    hasCompletedOnCall: false,
+    hasCompletedOnCall: true,
     hasEarlyMorningTask: true,
     learningTasksCompleted: 3,
   },
   INITIAL_BADGES
 );
+
+// Automatic Seed Function for Live Supabase
+async function seedSupabaseIfEmpty() {
+  if (!supabase) return;
+
+  try {
+    const { data: existingTasks } = await supabase.from('tasks').select('id').limit(1);
+    if (!existingTasks || existingTasks.length === 0) {
+      console.log('[TaskPulse] Seeding initial tasks into live Supabase database...');
+      // Map tasks to database column casing
+      const dbTasks = initialTasks.map((t) => ({
+        id: t.id,
+        user_id: null,
+        title: t.title,
+        description: t.description,
+        category_id: null,
+        priority: t.priority,
+        status: t.status,
+        start_date: t.startDate,
+        due_date: t.dueDate,
+        duration_minutes: t.durationMinutes,
+        alarm_enabled: t.alarmEnabled,
+        alarm_time: t.alarmTime,
+        progress: t.progress,
+        points_awarded: t.pointsAwarded || 0,
+      }));
+      await supabase.from('tasks').insert(dbTasks);
+      console.log('[TaskPulse] Seeded tasks into Supabase successfully!');
+    }
+  } catch (err) {
+    console.warn('[TaskPulse] Supabase seed notice:', err instanceof Error ? err.message : err);
+  }
+}
 
 // --- REST API ENDPOINTS ---
 
@@ -202,11 +246,13 @@ app.get('/api/health', (req, res) => {
     version: '1.0.0-flutter-crossplatform',
     currentFlavor: req.query.flavor || 'dev',
     time: new Date().toISOString(),
+    supabaseConnected: isSupabaseConfigured,
+    supabaseUrl: supabaseUrl ? `${supabaseUrl.slice(0, 24)}...` : null,
   });
 });
 
 // Authentication: Strictly ONLY Passwordless & Social Logins
-app.post('/api/auth/passwordless', (req, res) => {
+app.post('/api/auth/passwordless', async (req, res) => {
   const { email, method } = req.body; // method: 'magic_link' | 'otp' | 'passkey'
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Valid email is required for passwordless authentication.' });
@@ -216,16 +262,32 @@ app.post('/api/auth/passwordless', (req, res) => {
   currentUserProfile.email = email;
   currentUserProfile.username = email.split('@')[0];
 
+  if (supabase) {
+    try {
+      if (method === 'otp') {
+        await supabase.auth.signInWithOtp({ email });
+      } else {
+        await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: `${req.protocol}://${req.get('host')}` },
+        });
+      }
+    } catch (e) {
+      console.warn('Supabase auth notice:', e);
+    }
+  }
+
   res.json({
     success: true,
     method: method || 'magic_link',
     message: `Authenticated securely via ${method === 'otp' ? 'One-Time Passcode (OTP)' : 'Passwordless Magic Link'}.`,
     user: currentUserProfile,
     token: `jwt-taskpulse-passwordless-${Date.now()}`,
+    supabaseLive: isSupabaseConfigured,
   });
 });
 
-app.post('/api/auth/social', (req, res) => {
+app.post('/api/auth/social', async (req, res) => {
   const { provider } = req.body; // 'google' | 'github'
   if (!['google', 'github'].includes(provider)) {
     return res.status(400).json({ error: 'Only Google and GitHub social logins are supported.' });
@@ -237,6 +299,7 @@ app.post('/api/auth/social', (req, res) => {
     message: `Signed in successfully with ${provider.charAt(0).toUpperCase() + provider.slice(1)}.`,
     user: currentUserProfile,
     token: `jwt-taskpulse-social-${provider}-${Date.now()}`,
+    supabaseLive: isSupabaseConfigured,
   });
 });
 
@@ -245,19 +308,37 @@ app.get('/api/user/profile', (req, res) => {
   res.json(currentUserProfile);
 });
 
-app.put('/api/user/profile', (req, res) => {
+app.put('/api/user/profile', async (req, res) => {
   const updates = req.body;
   currentUserProfile = {
     ...currentUserProfile,
     ...updates,
-    id: currentUserProfile.id, // prevent changing ID
+    id: currentUserProfile.id,
   };
+
+  if (supabase) {
+    try {
+      await supabase.from('profiles').upsert({
+        id: currentUserProfile.id,
+        username: currentUserProfile.username,
+        avatar: currentUserProfile.avatar,
+        bio: currentUserProfile.bio,
+        role: currentUserProfile.role,
+        points: currentUserProfile.points,
+        level: currentUserProfile.level,
+        is_premium: currentUserProfile.isPremium,
+      });
+    } catch (e) {
+      console.warn('Supabase profile sync notice:', e);
+    }
+  }
+
   res.json(currentUserProfile);
 });
 
 // User Guides state (Feature-by-Feature guide persistence)
 app.post('/api/user/guides', (req, res) => {
-  const { guideId, action } = req.body; // action: 'complete' | 'skip' | 'skip_all' | 'reset'
+  const { guideId, action } = req.body;
 
   if (action === 'skip_all') {
     currentUserProfile.userGuides.skipAll = true;
@@ -278,11 +359,42 @@ app.post('/api/user/guides', (req, res) => {
 });
 
 // Tasks CRUD
-app.get('/api/tasks', (req, res) => {
+app.get('/api/tasks', async (req, res) => {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        // Map database columns to app schema
+        const mapped: Task[] = data.map((t) => ({
+          id: t.id,
+          userId: t.user_id || currentUserProfile.id,
+          title: t.title,
+          description: t.description || '',
+          categoryId: t.category_id || 'cat-office',
+          priority: t.priority as any,
+          status: t.status as any,
+          startDate: t.start_date || new Date().toISOString(),
+          dueDate: t.due_date || new Date().toISOString(),
+          durationMinutes: t.duration_minutes || 30,
+          alarmEnabled: !!t.alarm_enabled,
+          alarmTime: t.alarm_time,
+          progress: t.progress || 0,
+          dependencies: t.dependencies || [],
+          routineId: t.routine_id,
+          isRecurring: !!t.is_recurring,
+          completedAt: t.completed_at,
+          pointsAwarded: t.points_awarded,
+        }));
+        userTasks = mapped;
+      }
+    } catch (e) {
+      console.warn('Supabase tasks fetch notice:', e);
+    }
+  }
   res.json(userTasks);
 });
 
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async (req, res) => {
   const taskData = req.body;
   if (!taskData.title || !taskData.title.trim()) {
     return res.status(400).json({ error: 'Task title is required.' });
@@ -309,10 +421,33 @@ app.post('/api/tasks', (req, res) => {
   };
 
   userTasks.unshift(newTask);
+
+  if (supabase) {
+    try {
+      await supabase.from('tasks').insert({
+        id: newTask.id,
+        user_id: null,
+        title: newTask.title,
+        description: newTask.description,
+        category_id: null,
+        priority: newTask.priority,
+        status: newTask.status,
+        start_date: newTask.startDate,
+        due_date: newTask.dueDate,
+        duration_minutes: newTask.durationMinutes,
+        alarm_enabled: newTask.alarmEnabled,
+        alarm_time: newTask.alarmTime,
+        progress: newTask.progress,
+      });
+    } catch (e) {
+      console.warn('Supabase task insert notice:', e);
+    }
+  }
+
   res.status(201).json(newTask);
 });
 
-app.put('/api/tasks/:id', (req, res) => {
+app.put('/api/tasks/:id', async (req, res) => {
   const { id } = req.params;
   const index = userTasks.findIndex((t) => t.id === id);
   if (index === -1) {
@@ -323,14 +458,12 @@ app.put('/api/tasks/:id', (req, res) => {
   const updates = req.body;
 
   let pointsEarned = 0;
-  // If transitioning to completed
   if (updates.status === 'completed' && prevTask.status !== 'completed') {
     updates.completedAt = new Date().toISOString();
     updates.progress = 100;
     pointsEarned = calculateTaskPoints(prevTask.priority, currentUserProfile.currentStreak, !!prevTask.routineId);
     updates.pointsAwarded = pointsEarned;
 
-    // Update user profile points & streak
     currentUserProfile.points += pointsEarned;
     const levelInfo = calculateUserLevel(currentUserProfile.points);
     currentUserProfile.level = levelInfo.level;
@@ -338,7 +471,22 @@ app.put('/api/tasks/:id', (req, res) => {
 
   userTasks[index] = { ...prevTask, ...updates };
 
-  // Re-evaluate badges
+  if (supabase) {
+    try {
+      await supabase
+        .from('tasks')
+        .update({
+          status: userTasks[index].status,
+          progress: userTasks[index].progress,
+          completed_at: userTasks[index].completedAt,
+          points_awarded: userTasks[index].pointsAwarded,
+        })
+        .eq('id', id);
+    } catch (e) {
+      console.warn('Supabase update notice:', e);
+    }
+  }
+
   const completedCount = userTasks.filter((t) => t.status === 'completed').length;
   const learningCount = userTasks.filter((t) => t.status === 'completed' && t.categoryId === 'cat-learning').length;
   userBadges = evaluateBadges(
@@ -361,9 +509,18 @@ app.put('/api/tasks/:id', (req, res) => {
   });
 });
 
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/:id', async (req, res) => {
   const { id } = req.params;
   userTasks = userTasks.filter((t) => t.id !== id);
+
+  if (supabase) {
+    try {
+      await supabase.from('tasks').delete().eq('id', id);
+    } catch (e) {
+      console.warn('Supabase delete notice:', e);
+    }
+  }
+
   res.json({ success: true });
 });
 
@@ -375,7 +532,6 @@ app.get('/api/categories', (req, res) => {
 app.post('/api/categories', (req, res) => {
   const { name, color, icon, channel, isCustomColor } = req.body;
 
-  // Feature Flag enforcement
   const categoryLimitCheck = evaluateFeatureFlag('max_categories', currentUserProfile);
   if (!categoryLimitCheck.allowed && userCategories.length >= 4) {
     return res.status(403).json({ error: categoryLimitCheck.reason });
@@ -432,7 +588,6 @@ app.post('/api/routines/activate', (req, res) => {
     return res.status(404).json({ error: 'Routine not found.' });
   }
 
-  // Feature flag check
   const flagCheck = evaluateFeatureFlag('on_call_routine_generator', currentUserProfile);
   if (!flagCheck.allowed && routine.id.includes('oncall')) {
     return res.status(403).json({ error: flagCheck.reason });
@@ -442,7 +597,6 @@ app.post('/api/routines/activate', (req, res) => {
   routine.lastActivatedAt = activate ? new Date().toISOString() : routine.lastActivatedAt;
 
   if (activate) {
-    // Generate batch tasks
     const generated = generateRoutineTasks(routine, new Date(), currentUserProfile.id);
     const newTasksWithIds: Task[] = generated.map((t, idx) => ({
       ...t,
@@ -451,7 +605,6 @@ app.post('/api/routines/activate', (req, res) => {
 
     userTasks = [...newTasksWithIds, ...userTasks];
   } else {
-    // Deactivating removes pending future tasks belonging to this routine
     userTasks = userTasks.filter((t) => t.routineId !== routineId || t.status === 'completed');
   }
 
@@ -467,7 +620,7 @@ app.post('/api/focus/complete', (req, res) => {
   const { taskId, minutes } = req.body;
   currentUserProfile.focusSessionsCompleted += 1;
   currentUserProfile.totalFocusMinutes += minutes || 25;
-  currentUserProfile.points += 40; // Focus mode bonus points
+  currentUserProfile.points += 40;
 
   if (taskId) {
     const task = userTasks.find((t) => t.id === taskId);
@@ -540,7 +693,6 @@ app.get('/api/subscription', (req, res) => {
 });
 
 app.post('/api/subscription/extend', (req, res) => {
-  // Simulates upgrading or extending pro membership
   const extendedDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
   currentUserProfile.isPremium = true;
   currentUserProfile.premiumUntil = extendedDate;
@@ -554,6 +706,8 @@ app.post('/api/subscription/extend', (req, res) => {
 
 // Setup Vite middleware in dev or serve static build in production
 async function startServer() {
+  await seedSupabaseIfEmpty();
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.get('*', (req, res) => {
