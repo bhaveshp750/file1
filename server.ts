@@ -704,6 +704,57 @@ app.post('/api/subscription/extend', (req, res) => {
   });
 });
 
+// --- SCRATCHPAD ENDPOINTS ---
+interface ScratchNoteItem {
+  id: string;
+  userId: string;
+  text: string;
+  createdAt: string;
+}
+
+let userScratchNotes: ScratchNoteItem[] = [
+  {
+    id: 'note-1',
+    userId: currentUserProfile.id,
+    text: '/p1 /office /remind 2h Verify ingress latency & webhook circuit breaker',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'note-2',
+    userId: currentUserProfile.id,
+    text: '/sadhana /p2 Evening 15-minute mindfulness and breathwork',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+app.get('/api/scratchpad', (req, res) => {
+  res.json(userScratchNotes);
+});
+
+app.post('/api/scratchpad', (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'Note text required' });
+  }
+
+  const newNote: ScratchNoteItem = {
+    id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    userId: currentUserProfile.id,
+    text: text.trim(),
+    createdAt: new Date().toISOString(),
+  };
+
+  userScratchNotes.unshift(newNote);
+  res.status(201).json(newNote);
+});
+
+app.delete('/api/scratchpad/:id', (req, res) => {
+  const { id } = req.params;
+  userScratchNotes = userScratchNotes.filter((n) => n.id !== id);
+  res.json({ success: true });
+});
+
+
 // Setup Vite middleware in dev or serve static build in production
 async function startServer() {
   await seedSupabaseIfEmpty();

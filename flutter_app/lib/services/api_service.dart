@@ -48,6 +48,16 @@ abstract class RestApiClient {
 
   @POST("/auth/social")
   Future<Map<String, dynamic>> socialLogin(@Body() Map<String, dynamic> body);
+
+  // --- SCRATCHPAD & QUICK NOTES ---
+  @GET("/scratchpad")
+  Future<List<dynamic>> getScratchNotes();
+
+  @POST("/scratchpad")
+  Future<Map<String, dynamic>> createScratchNote(@Body() Map<String, dynamic> note);
+
+  @DELETE("/scratchpad/{id}")
+  Future<void> deleteScratchNote(@Path("id") String id);
 }
 
 // Dio Factory Helper with Base Options & Interceptors

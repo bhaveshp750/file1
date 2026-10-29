@@ -166,4 +166,26 @@ export const api = {
     });
     return res.json();
   },
+
+  async getScratchNotes() {
+    const res = await fetch(`${API_BASE}/scratchpad`);
+    return res.json();
+  },
+
+  async addScratchNote(text: string) {
+    const res = await fetch(`${API_BASE}/scratchpad`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    return res.json();
+  },
+
+  async deleteScratchNote(id: string) {
+    const res = await fetch(`${API_BASE}/scratchpad/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
+  },
 };
+

@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Task, Category, RoutineTemplate, UserProfile, Badge, AppFlavor, DeviceFrame } from './types/index';
+import { Task, Category, RoutineTemplate, UserProfile, Badge, AppFlavor, DeviceFrame, ScratchNote } from './types/index';
 import { api } from './services/api';
 import { soundService } from './services/sound';
 import { TaskBloc, initialTaskState, TaskState } from './bloc/task_bloc';
@@ -22,6 +22,7 @@ import { FullscreenAlarmModal } from './components/FullscreenAlarmModal';
 import { UserGuideOverlay } from './components/UserGuideOverlay';
 import { ProfileModal } from './components/ProfileModal';
 import { AuthModal } from './components/AuthModal';
+import { ScratchpadDrawer } from './components/ScratchpadDrawer';
 
 export default function App() {
   // App Flavor & Device Frame
@@ -38,6 +39,9 @@ export default function App() {
   const [routines, setRoutines] = useState<RoutineTemplate[]>([]);
   const [badges, setBadges] = useState<Badge[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  const [scratchNotes, setScratchNotes] = useState<ScratchNote[]>([]);
+  const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
 
   // Modals & Overlays
   const [focusTask, setFocusTask] = useState<Task | null>(null);
@@ -62,16 +66,18 @@ export default function App() {
     async function initApp() {
       try {
         taskBloc.add({ type: 'TASK_FETCH_REQUESTED' });
-        const [cats, rts, prof, gam] = await Promise.all([
+        const [cats, rts, prof, gam, notes] = await Promise.all([
           api.getCategories(),
           api.getRoutines(),
           api.getProfile(),
           api.getGamification(),
+          api.getScratchNotes(),
         ]);
         setCategories(cats);
         setRoutines(rts);
         setProfile(prof);
         if (gam.badges) setBadges(gam.badges);
+        if (notes) setScratchNotes(notes);
       } catch (err) {
         console.error('Initial data load error:', err);
       }
@@ -81,6 +87,22 @@ export default function App() {
 
   // Synchronize category map
   const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+
+  // Scratchpad Handlers
+  const handleAddScratchNote = async (text: string) => {
+    const newNote = await api.addScratchNote(text);
+    setScratchNotes([newNote, ...scratchNotes]);
+  };
+
+  const handleDeleteScratchNote = async (id: string) => {
+    await api.deleteScratchNote(id);
+    setScratchNotes(scratchNotes.filter((n) => n.id !== id));
+  };
+
+  const handleConvertScratchToTask = async (note: ScratchNote, taskData: Partial<Task>) => {
+    await handleAddTask(taskData);
+    await handleDeleteScratchNote(note.id);
+  };
 
   // --- HANDLERS ---
   const handleAddTask = async (taskData: Partial<Task>) => {
@@ -193,6 +215,8 @@ export default function App() {
       profile={profile}
       onOpenProfile={() => setIsProfileOpen(true)}
       onOpenAuth={() => setIsAuthOpen(true)}
+      onOpenScratchpad={() => setIsScratchpadOpen(true)}
+      scratchNotesCount={scratchNotes.length}
     >
       {/* Tab 1: First-Person View (FPV) Cockpit Dashboard */}
       {activeTab === 'cockpit' && (
@@ -206,6 +230,7 @@ export default function App() {
           onOpenFocusMode={handleOpenFocusMode}
           onTriggerAlarmTest={handleTriggerAlarmTest}
           onOpenProfile={() => setIsProfileOpen(true)}
+          onOpenScratchpad={() => setIsScratchpadOpen(true)}
         />
       )}
 
@@ -303,6 +328,17 @@ export default function App() {
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthSuccess={(u) => setProfile(u)}
+      />
+
+      {/* Quick Scratchpad with Slash Commands */}
+      <ScratchpadDrawer
+        isOpen={isScratchpadOpen}
+        onClose={() => setIsScratchpadOpen(false)}
+        categories={categories}
+        notes={scratchNotes}
+        onAddNote={handleAddScratchNote}
+        onDeleteNote={handleDeleteScratchNote}
+        onConvertToTask={handleConvertScratchToTask}
       />
     </FlutterShell>
   );

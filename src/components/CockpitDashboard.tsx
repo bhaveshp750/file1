@@ -12,6 +12,7 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  FileText,
   Filter,
   Flame,
   Plus,
@@ -32,6 +33,7 @@ interface CockpitDashboardProps {
   onOpenFocusMode: (task: Task) => void;
   onTriggerAlarmTest: (task: Task) => void;
   onOpenProfile: () => void;
+  onOpenScratchpad?: () => void;
 }
 
 export const CockpitDashboard: React.FC<CockpitDashboardProps> = ({
@@ -44,6 +46,7 @@ export const CockpitDashboard: React.FC<CockpitDashboardProps> = ({
   onOpenFocusMode,
   onTriggerAlarmTest,
   onOpenProfile,
+  onOpenScratchpad,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
@@ -158,6 +161,17 @@ export const CockpitDashboard: React.FC<CockpitDashboardProps> = ({
                 <div className="text-[10px] text-zinc-400">Total Points</div>
               </div>
             </div>
+
+            {onOpenScratchpad && (
+              <button
+                onClick={onOpenScratchpad}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
+                title="Quick Scratchpad (/commands to convert to tasks)"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>Scratchpad (/cmd)</span>
+              </button>
+            )}
 
             <button
               onClick={() => setIsAddingTask(true)}

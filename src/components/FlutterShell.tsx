@@ -16,6 +16,7 @@ import {
   Compass,
   Cpu,
   Crown,
+  FileText,
   Flame,
   Laptop,
   Layers,
@@ -45,6 +46,8 @@ interface FlutterShellProps {
   profile: UserProfile;
   onOpenProfile: () => void;
   onOpenAuth: () => void;
+  onOpenScratchpad?: () => void;
+  scratchNotesCount?: number;
   children: React.ReactNode;
 }
 
@@ -60,6 +63,8 @@ export const FlutterShell: React.FC<FlutterShellProps> = ({
   profile,
   onOpenProfile,
   onOpenAuth,
+  onOpenScratchpad,
+  scratchNotesCount = 0,
   children,
 }) => {
   const [showBlocInspector, setShowBlocInspector] = useState(false);
@@ -183,8 +188,25 @@ export const FlutterShell: React.FC<FlutterShellProps> = ({
             </div>
           </div>
 
-          {/* Right Action Tools: Dark/Light Mode, BLoC stream, Profile */}
+          {/* Right Action Tools: Scratchpad, Dark/Light Mode, BLoC stream, Profile */}
           <div className="flex items-center gap-2">
+            {/* Quick Scratchpad Button */}
+            {onOpenScratchpad && (
+              <button
+                onClick={onOpenScratchpad}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                title="Quick Scratchpad (/commands to convert to tasks)"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Scratchpad</span>
+                {scratchNotesCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black">
+                    {scratchNotesCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Dart BLoC Code Export */}
             <button
               onClick={() => setShowFlutterCodeModal(true)}

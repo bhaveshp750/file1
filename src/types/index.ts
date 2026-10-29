@@ -107,3 +107,11 @@ export interface WidgetItem {
   size: '2x2' | '4x2';
   pinned: boolean;
 }
+
+export interface ScratchNote {
+  id: string;
+  userId: string;
+  text: string;
+  createdAt: string;
+  convertedTaskId?: string | null;
+}
