@@ -1,0 +1,7 @@
+{
+  "name": "TaskPulse",
+  "description": "High-performance cross-platform task & project management tool with interactive Gantt charts, real-time sync, First-Person View life tracking, and offline support.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
